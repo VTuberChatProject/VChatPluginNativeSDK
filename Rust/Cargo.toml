@@ -1,0 +1,18 @@
+[package]
+name = "vchat-plugin-api"
+version = "0.1.0"
+edition = "2024"
+build = "build.rs"
+
+[lib]
+path = "lib.rs"
+
+[dependencies]
+prost.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+vchat-core = { path = ".." }
+
+[build-dependencies]
+prost-build = "=0.14.1"
+protoc-bin-vendored = "=3.2.0"

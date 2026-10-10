@@ -1,0 +1,47 @@
+syntax = "proto3";
+package vchat.plugin.v1;
+
+// 核心文档为结构化字段；JSON 保存向前兼容扩展。
+message Document { uint32 version = 1; uint64 revision = 2; bytes json = 3; repeated Paragraph paragraphs = 4; }
+message Paragraph { repeated Segment segments = 1; }
+message Segment {
+  string text = 1; TextStyle style = 2; optional string ruby = 3;
+  optional uint32 speed = 4; optional uint32 pause = 5; Image image = 6;
+  optional string class = 7; bytes extra_json = 8;
+}
+message TextStyle {
+  bool bold = 1; bool italic = 2; bool underline = 3; bool strikethrough = 4;
+  optional string color = 5; optional string background_color = 6; optional string size = 7;
+  bytes extra_json = 8;
+}
+message Image { string source = 1; float width = 2; float height = 3; }
+message Message {
+  string id = 1; string source_id = 2; string source_message_id = 3;
+  int64 received_at_ms = 4; uint64 sequence = 5; Document document = 6;
+  optional int64 source_time = 7; string username = 8; string status = 9; repeated string origin_ids = 10;
+}
+message Selection { uint64 start = 1; uint64 end = 2; }
+message PluginRequest {
+  uint32 protocol_version = 1; string operation = 2; bytes payload_json = 3;
+  Document document = 4; Selection selection = 5; string event_id = 6; Message message = 7;
+}
+message PluginError { string code = 1; string message = 2; }
+message DocumentEdit { uint64 expected_revision = 1; Document replacement = 2; }
+message PluginResponse {
+  bytes payload_json = 1; PluginError error = 2; DocumentEdit edit = 3;
+  UiContribution ui = 4;
+}
+message UiCommand {
+  string id = 1; string label = 2; string icon = 3; string tooltip = 4;
+  bool enabled = 5; bool selected = 6;
+}
+message UiField {
+  string id = 1; string label = 2; string kind = 3; string value_json = 4;
+  repeated string options = 5; double minimum = 6; double maximum = 7;
+}
+message UiContribution { repeated UiCommand commands = 1; repeated UiField fields = 2; }
+message StateSnapshot { string plugin_id = 1; uint32 format_version = 2; bytes data = 3; }
+message HostRequest {
+  string service = 1; bytes payload_json = 2; UiContribution ui = 3;
+  string event_id = 4;
+}
