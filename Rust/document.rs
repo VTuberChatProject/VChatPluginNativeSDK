@@ -122,6 +122,11 @@ pub fn message_to_proto(value: &vchat_core::Message) -> proto::Message {
             .unwrap()
             .into(),
         origin_ids: value.origin_ids.clone(),
+        message_type: value.message_type.as_ref().map(|kind| proto::MessageType {
+            plugin_kind: kind.plugin_kind.clone(),
+            plugin_id: kind.plugin_id.clone(),
+            type_id: kind.type_id.clone(),
+        }),
     }
 }
 
@@ -151,5 +156,34 @@ mod tests {
         let wire = document_to_proto(&doc).encode_to_vec();
         let decoded = proto::Document::decode(wire.as_slice()).unwrap();
         assert_eq!(document_from_proto(&decoded).unwrap(), doc);
+    }
+
+    #[test]
+    fn message_type_identity_is_optional_and_survives_protobuf() {
+        let mut message =
+            vchat_core::Message::new("source", "author", Document::plain("消息"), 1, 1);
+        let old = message_to_proto(&message).encode_to_vec();
+        assert_eq!(
+            proto::Message::decode(old.as_slice()).unwrap().message_type,
+            None
+        );
+        message.message_type = Some(vchat_core::MessageTypeKey {
+            plugin_kind: "internal".into(),
+            plugin_id: "example".into(),
+            type_id: "remote".into(),
+        });
+        let wire = message_to_proto(&message).encode_to_vec();
+        let kind = proto::Message::decode(wire.as_slice())
+            .unwrap()
+            .message_type
+            .unwrap();
+        assert_eq!(
+            (
+                kind.plugin_kind.as_str(),
+                kind.plugin_id.as_str(),
+                kind.type_id.as_str()
+            ),
+            ("internal", "example", "remote")
+        );
     }
 }

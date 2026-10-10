@@ -1,5 +1,5 @@
 //! 消息标识、来源策略及生命周期状态。
-use crate::Document;
+use crate::{Document, MessageTypeKey};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -30,6 +30,8 @@ pub struct Message {
     pub status: MessageStatus,
     #[serde(default)]
     pub origin_ids: Vec<String>,
+    #[serde(default)]
+    pub message_type: Option<MessageTypeKey>,
 }
 
 impl Message {
@@ -52,7 +54,15 @@ impl Message {
             document,
             status: MessageStatus::Received,
             origin_ids: Vec::new(),
+            message_type: None,
         }
+    }
+
+    /// 旧消息缺少字段时仍有稳定身份，供暂停策略统一匹配。
+    pub fn type_key(&self) -> MessageTypeKey {
+        self.message_type
+            .clone()
+            .unwrap_or_else(MessageTypeKey::legacy)
     }
 
     pub fn resend(&self, received_at: i64, sequence: u64) -> Self {

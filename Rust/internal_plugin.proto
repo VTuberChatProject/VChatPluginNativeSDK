@@ -19,7 +19,10 @@ message Message {
   string id = 1; string source_id = 2; string source_message_id = 3;
   int64 received_at_ms = 4; uint64 sequence = 5; Document document = 6;
   optional int64 source_time = 7; string username = 8; string status = 9; repeated string origin_ids = 10;
+  MessageType message_type = 11;
 }
+// 类型归属由宿主鉴权后生成，插件提交时仅使用插件内 type_id。
+message MessageType { string plugin_kind = 1; string plugin_id = 2; string type_id = 3; }
 message Selection { uint64 start = 1; uint64 end = 2; }
 message PluginRequest {
   uint32 protocol_version = 1; string operation = 2; bytes payload_json = 3;

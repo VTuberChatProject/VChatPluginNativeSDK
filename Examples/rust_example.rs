@@ -116,6 +116,30 @@ unsafe extern "C" fn start(p: PluginContext) -> i32 {
         if status != STATUS_OK {
             return status;
         }
+        // 类型声明先于消息入队，热更新候选的两个请求共同暂存并按序提交。
+        if ctx.post_on_start || ctx.background_enabled {
+            let request = HostRequest {
+                service: "message.types.register".into(),
+                payload_json: serde_json::to_vec(&serde_json::json!({
+                    "version":1,"types":[{"id":"remote","label":"远程消息"}]
+                }))
+                .unwrap(),
+                ..Default::default()
+            }
+            .encode_to_vec();
+            let status = unsafe {
+                (ctx.host.invoke)(
+                    ctx.host.context,
+                    request.as_ptr(),
+                    request.len(),
+                    ignore_write,
+                    std::ptr::null_mut(),
+                )
+            };
+            if status != STATUS_OK {
+                return status;
+            }
+        }
         if ctx.post_on_start {
             let event = format!("start-{}-{}", ctx.host.generation, ctx.start_epoch);
             let status = post_message(
@@ -174,6 +198,7 @@ fn post_message(invoke: HostInvoke, context: usize, event: &str, text: &str) -> 
     let payload = serde_json::json!({
         "source_id":"internal:example.counter", "source_message_id":event,
         "username":"示例插件", "origin_ids":[],
+        "message_type":"remote",
         "document":{"version":1,"revision":0,"paragraphs":[{"segments":[{"text":text,"style":{}}]}]}
     });
     let bytes = HostRequest {
