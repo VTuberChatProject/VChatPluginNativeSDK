@@ -116,6 +116,7 @@ pub fn message_to_proto(value: &vchat_core::Message) -> proto::Message {
         document: Some(document_to_proto(&value.document)),
         source_time: value.source_time,
         username: value.username.clone(),
+        avatar_url: value.avatar_url.clone(),
         status: serde_json::to_value(value.status)
             .unwrap()
             .as_str()
@@ -172,11 +173,16 @@ mod tests {
             plugin_id: "example".into(),
             type_id: "remote".into(),
         });
+        message.avatar_url = Some("https://example.com/avatar.png".into());
         let wire = message_to_proto(&message).encode_to_vec();
         let kind = proto::Message::decode(wire.as_slice())
             .unwrap()
             .message_type
             .unwrap();
+        assert_eq!(
+            proto::Message::decode(wire.as_slice()).unwrap().avatar_url,
+            message.avatar_url
+        );
         assert_eq!(
             (
                 kind.plugin_kind.as_str(),

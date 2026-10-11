@@ -26,6 +26,9 @@ pub struct Message {
     pub received_at: i64,
     pub sequence: u64,
     pub username: String,
+    /// 插件提供的头像链接，旧消息省略时采用姓名字头像。
+    #[serde(default)]
+    pub avatar_url: Option<String>,
     pub document: Document,
     pub status: MessageStatus,
     #[serde(default)]
@@ -51,6 +54,7 @@ impl Message {
             received_at,
             sequence,
             username: username.into(),
+            avatar_url: None,
             document,
             status: MessageStatus::Received,
             origin_ids: Vec::new(),
@@ -63,6 +67,15 @@ impl Message {
         self.message_type
             .clone()
             .unwrap_or_else(MessageTypeKey::legacy)
+    }
+
+    /// 本地输入使用内置类型，历史主播消息按来源兼容识别。
+    pub fn is_self(&self) -> bool {
+        self.message_type
+            .as_ref()
+            .map_or(self.source_id == "host", |key| {
+                *key == MessageTypeKey::local()
+            })
     }
 
     pub fn resend(&self, received_at: i64, sequence: u64) -> Self {
