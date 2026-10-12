@@ -24,7 +24,19 @@ pub fn document_to_proto(value: &Document) -> proto::Document {
                             color: s.style.color.clone(),
                             background_color: s.style.background_color.clone(),
                             size: s.style.size.clone(),
-                            extra_json: serde_json::to_vec(&s.style.extra).unwrap(),
+                            extra_json: {
+                                // 五项新属性走既有扩展通道，旧插件保留相同线协议。
+                                let mut extras = s.style.extra.clone();
+                                let all = serde_json::to_value(&s.style).unwrap();
+                                for key in
+                                    ["weight", "emphasis", "letterSpacing", "stretch", "shadow"]
+                                {
+                                    if let Some(value) = all.get(key) {
+                                        extras.insert(key.into(), value.clone());
+                                    }
+                                }
+                                serde_json::to_vec(&extras).unwrap()
+                            },
                         }),
                         ruby: s.ruby.clone(),
                         speed: s.speed,
@@ -64,16 +76,20 @@ pub fn document_from_proto(value: &proto::Document) -> Result<Document, String> 
                 .iter()
                 .map(|s| {
                     let style = if let Some(style) = &s.style {
-                        TextStyle {
-                            bold: style.bold,
-                            italic: style.italic,
-                            underline: style.underline,
-                            strikethrough: style.strikethrough,
-                            color: style.color.clone(),
-                            background_color: style.background_color.clone(),
-                            size: style.size.clone(),
-                            extra: extras(&style.extra_json)?,
+                        let mut fields = extras(&style.extra_json)?;
+                        for (key, value) in [
+                            ("bold", serde_json::json!(style.bold)),
+                            ("italic", serde_json::json!(style.italic)),
+                            ("underline", serde_json::json!(style.underline)),
+                            ("strikethrough", serde_json::json!(style.strikethrough)),
+                            ("color", serde_json::json!(style.color)),
+                            ("backgroundColor", serde_json::json!(style.background_color)),
+                            ("size", serde_json::json!(style.size)),
+                        ] {
+                            fields.insert(key.into(), value);
                         }
+                        serde_json::from_value::<TextStyle>(serde_json::Value::Object(fields))
+                            .map_err(|e| e.to_string())?
                     } else {
                         TextStyle::default()
                     };
@@ -140,6 +156,11 @@ mod tests {
         let mut doc = Document::plain("你好 👨‍👩‍👧‍👦\n下一段");
         let s = &mut doc.paragraphs[0].segments[0];
         s.style.bold = true;
+        s.style.weight = Some("semi-bold".into());
+        s.style.emphasis = Some(true);
+        s.style.letter_spacing = Some("half-width".into());
+        s.style.stretch = Some("condensed".into());
+        s.style.shadow = Some(Default::default());
         s.style.color = Some("#aa1234".into());
         s.style
             .extra

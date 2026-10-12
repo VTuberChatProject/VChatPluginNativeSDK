@@ -63,8 +63,90 @@ pub struct TextStyle {
     pub background_color: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub size: Option<String>,
+    #[serde(
+        default,
+        deserialize_with = "read_weight",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub weight: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub emphasis: Option<bool>,
+    #[serde(
+        rename = "letterSpacing",
+        alias = "letter_spacing",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub letter_spacing: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stretch: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shadow: Option<TextShadow>,
     #[serde(flatten)]
     pub extra: Map<String, Value>,
+}
+
+/// 旧扩展允许数字字重，读入后转换成 EchoLive 命名档位。
+fn read_weight<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<String>, D::Error> {
+    let value = Option::<Value>::deserialize(deserializer)?;
+    Ok(value.and_then(|value| {
+        let text = match value {
+            Value::String(s) => s,
+            Value::Number(n) => n.to_string(),
+            _ => return None,
+        };
+        Some(
+            match text.as_str() {
+                "100" => "thin",
+                "200" => "extra-light",
+                "300" => "light",
+                "350" => "semi-light",
+                "400" => "normal",
+                "500" => "medium",
+                "600" => "semi-bold",
+                "700" => "bold",
+                "800" => "extra-bold",
+                "900" => "black",
+                "950" => "extra-black",
+                _ => &text,
+            }
+            .to_owned(),
+        )
+    }))
+}
+
+/// EchoLive 投影长度保留 CSS 单位，界面编辑统一使用 em。
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct TextShadow {
+    #[serde(deserialize_with = "read_length")]
+    pub x: String,
+    #[serde(deserialize_with = "read_length")]
+    pub y: String,
+    #[serde(deserialize_with = "read_length")]
+    pub blur: String,
+    pub color: String,
+}
+
+/// 导入的零长度可以使用 JSON 数字，保持 EchoLive 原始单位表示。
+fn read_length<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<String, D::Error> {
+    match Value::deserialize(deserializer)? {
+        Value::String(value) => Ok(value),
+        Value::Number(value) => Ok(value.to_string()),
+        _ => Err(serde::de::Error::custom("投影长度需要字符串或数字")),
+    }
+}
+
+impl Default for TextShadow {
+    fn default() -> Self {
+        Self {
+            x: "0em".into(),
+            y: "0em".into(),
+            blur: "0.25em".into(),
+            color: "#000000".into(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -142,6 +224,29 @@ impl Document {
             {
                 return Err(DocumentError::UnsafeAttribute("class"));
             }
+            if let Some(shadow) = &segment.style.shadow {
+                for length in [&shadow.x, &shadow.y, &shadow.blur] {
+                    let number = length
+                        .trim()
+                        .strip_suffix("em")
+                        .or_else(|| length.trim().strip_suffix("px"))
+                        .unwrap_or(length.trim());
+                    if !number.parse::<f32>().is_ok_and(|v| v.is_finite()) {
+                        return Err(DocumentError::UnsafeAttribute("shadow length"));
+                    }
+                }
+                let blur = shadow
+                    .blur
+                    .trim()
+                    .trim_end_matches("em")
+                    .trim_end_matches("px");
+                if blur.parse::<f32>().is_ok_and(|v| v < 0.0)
+                    || !safe_css(&shadow.color)
+                    || shadow.color.contains([';', '{', '}'])
+                {
+                    return Err(DocumentError::UnsafeAttribute("shadow"));
+                }
+            }
             for color in [&segment.style.color, &segment.style.background_color]
                 .into_iter()
                 .flatten()
@@ -150,7 +255,10 @@ impl Document {
                     return Err(DocumentError::UnsafeAttribute("color"));
                 }
             }
-            validate_extension(&Value::Object(segment.style.extra.clone()), "style")?;
+            validate_extension(
+                &serde_json::to_value(&segment.style).expect("样式为有效 JSON"),
+                "style",
+            )?;
             validate_extension(&Value::Object(segment.extra.clone()), "extra")?;
             if segment.speed == Some(0)
                 || segment.speed.is_some_and(|v| v > 60_000)
