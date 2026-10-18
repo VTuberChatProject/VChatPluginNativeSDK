@@ -34,6 +34,11 @@ message DocumentEdit { uint64 expected_revision = 1; Document replacement = 2; }
 message PluginResponse {
   bytes payload_json = 1; PluginError error = 2; DocumentEdit edit = 3;
   UiContribution ui = 4;
+  // HTTP route response fields; status 0 uses 200 and empty content_type uses octet-stream.
+  uint32 status = 5;
+  string content_type = 6;
+  bool no_store = 7;
+  bytes body = 8;
 }
 message UiCommand {
   string id = 1; string label = 2; string icon = 3; string tooltip = 4;
