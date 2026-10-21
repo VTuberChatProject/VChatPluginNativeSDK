@@ -4,6 +4,7 @@ fn main() {
     let mut config = prost_build::Config::new();
     config.protoc_executable(protoc_bin_vendored::protoc_bin_path().expect("protoc"));
     config.type_attribute(".", "#[derive(serde::Serialize, serde::Deserialize)]");
+    config.field_attribute("vchat.plugin.v1.UiField.schema_json", "#[serde(default)]");
     config
         .compile_protos(&["internal_plugin.proto"], &["."])
         .expect("plugin protocol");

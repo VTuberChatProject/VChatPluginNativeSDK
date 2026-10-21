@@ -47,6 +47,8 @@ message UiCommand {
 message UiField {
   string id = 1; string label = 2; string kind = 3; string value_json = 4;
   repeated string options = 5; double minimum = 6; double maximum = 7;
+  // 复杂原生表单的版本化 JSON 定义；空值沿用已有字段控件。
+  string schema_json = 8;
 }
 message UiContribution { repeated UiCommand commands = 1; repeated UiField fields = 2; }
 message StateSnapshot { string plugin_id = 1; uint32 format_version = 2; bytes data = 3; }
