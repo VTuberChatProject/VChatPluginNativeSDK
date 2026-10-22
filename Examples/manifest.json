@@ -3,7 +3,7 @@
   "entry": "bin/__LIB_PREFIX__vchat_example_plugin.__LIB_EXTENSION__",
   "id": "example.counter",
   "name": "示例计数插件",
-  "author": "VChat Contributors",
+  "author": "AuraElicase",
   "description": "演示消息投递、事件订阅与插件状态迁移。",
   "version": "1.0.0",
   "platform": "__PLATFORM__",
