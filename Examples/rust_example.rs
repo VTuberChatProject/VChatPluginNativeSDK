@@ -19,6 +19,7 @@ struct Context {
     sleep_ms: u64,
     post_on_start: bool,
     duplicate_start_post: bool,
+    config_on_start: Option<serde_json::Value>,
     background_enabled: bool,
     background: Option<(Arc<AtomicBool>, JoinHandle<()>)>,
     background_posts: Arc<AtomicU64>,
@@ -62,6 +63,7 @@ unsafe extern "C" fn create(
             fail_start: config["fail_start"].as_bool().unwrap_or(false),
             post_on_start: config["post_on_start"].as_bool().unwrap_or(false),
             duplicate_start_post: config["duplicate_start_post"].as_bool().unwrap_or(false),
+            config_on_start: config.get("config_on_start").cloned(),
             sleep_ms: config["sleep_ms"].as_u64().unwrap_or(0),
             background_enabled: config["background_post"].as_bool().unwrap_or(false),
             background: None,
@@ -81,6 +83,27 @@ unsafe extern "C" fn start(p: PluginContext) -> i32 {
             return STATUS_ERROR;
         }
         ctx.start_epoch += 1;
+        // 启动时写入宿主配置，用于演示候选配置与插件包引用共同持久化。
+        if let Some(config) = &ctx.config_on_start {
+            let request = HostRequest {
+                service: "config.set".into(),
+                payload_json: serde_json::to_vec(config).unwrap(),
+                ..Default::default()
+            }
+            .encode_to_vec();
+            let status = unsafe {
+                (ctx.host.invoke)(
+                    ctx.host.context,
+                    request.as_ptr(),
+                    request.len(),
+                    ignore_write,
+                    std::ptr::null_mut(),
+                )
+            };
+            if status != STATUS_OK {
+                return status;
+            }
+        }
         let ui = UiContribution {
             commands: vec![UiCommand {
                 id: "append-counter".into(),
@@ -236,6 +259,10 @@ unsafe extern "C" fn invoke(
         if request.protocol_version != 1 {
             return STATUS_ERROR;
         }
+        if request.operation == "crash" {
+            // 示例故障入口用于验证宿主的进程隔离与重启行为。
+            std::process::exit(42);
+        }
         std::thread::sleep(std::time::Duration::from_millis(ctx.sleep_ms));
         ctx.count += 1;
         let mut response = PluginResponse {
@@ -244,6 +271,12 @@ unsafe extern "C" fn invoke(
         };
         if request.operation == "counter" {
             response.payload_json = serde_json::to_vec(&ctx.count).unwrap();
+        }
+        if request.operation == "runtime-paths" {
+            let Ok(paths) = (unsafe { vchat_plugin_api::runtime::runtime_paths(&ctx.host) }) else {
+                return STATUS_ERROR;
+            };
+            response.payload_json = serde_json::to_vec(&paths).unwrap();
         }
         if request.operation == "background-count" {
             response.payload_json =
