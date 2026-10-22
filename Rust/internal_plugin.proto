@@ -50,7 +50,15 @@ message UiField {
   // 复杂原生表单的版本化 JSON 定义；空值沿用已有字段控件。
   string schema_json = 8;
 }
-message UiContribution { repeated UiCommand commands = 1; repeated UiField fields = 2; }
+// 输出卡片由插件声明，宿主解释三类标准操作；每张卡片最多两个操作。
+message OutputAction { string id = 1; string label = 2; string kind = 3; string target = 4; }
+message OutputCard {
+  string id = 1; string title = 2; string subtitle = 3; repeated OutputAction actions = 4;
+}
+message UiContribution {
+  repeated UiCommand commands = 1; repeated UiField fields = 2;
+  repeated OutputCard output_cards = 3;
+}
 message StateSnapshot { string plugin_id = 1; uint32 format_version = 2; bytes data = 3; }
 message HostRequest {
   string service = 1; bytes payload_json = 2; UiContribution ui = 3;

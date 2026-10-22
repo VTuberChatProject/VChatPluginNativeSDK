@@ -120,6 +120,7 @@ unsafe extern "C" fn start(p: PluginContext) -> i32 {
                 value_json: "\"计数\"".into(),
                 ..Default::default()
             }],
+            ..Default::default()
         };
         let request = HostRequest {
             service: "ui.register".into(),

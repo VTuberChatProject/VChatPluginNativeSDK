@@ -5,6 +5,12 @@ fn main() {
     config.protoc_executable(protoc_bin_vendored::protoc_bin_path().expect("protoc"));
     config.type_attribute(".", "#[derive(serde::Serialize, serde::Deserialize)]");
     config.field_attribute("vchat.plugin.v1.UiField.schema_json", "#[serde(default)]");
+    config.field_attribute(
+        "vchat.plugin.v1.UiContribution.output_cards",
+        "#[serde(default)]",
+    );
+    config.field_attribute("vchat.plugin.v1.OutputCard.actions", "#[serde(default)]");
+    config.field_attribute("vchat.plugin.v1.OutputAction.target", "#[serde(default)]");
     config
         .compile_protos(&["internal_plugin.proto"], &["."])
         .expect("plugin protocol");
