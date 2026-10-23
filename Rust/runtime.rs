@@ -9,6 +9,9 @@ pub struct RuntimePaths {
     pub package_root: PathBuf,
     pub resources_root: PathBuf,
     pub data_root: PathBuf,
+    /// 宿主提供的共享可写资源根目录；旧宿主可省略。
+    #[serde(default)]
+    pub assets_root: Option<PathBuf>,
 }
 
 /// 在 create 或后续生命周期调用中获取宿主管理的绝对路径。
@@ -72,11 +75,21 @@ mod tests {
     }
 
     #[test]
+    fn legacy_paths_allow_missing_assets_root() {
+        let paths: RuntimePaths = serde_json::from_value(serde_json::json!({
+            "package_root":"package", "resources_root":"package/resources", "data_root":"data"
+        }))
+        .unwrap();
+        assert!(paths.assets_root.is_none());
+    }
+
+    #[test]
     fn paths_come_from_host_and_invalid_responses_are_rejected() {
         let paths = RuntimePaths {
             package_root: PathBuf::from("包目录"),
             resources_root: PathBuf::from("包目录/resources"),
             data_root: PathBuf::from("持久化数据"),
+            assets_root: Some(PathBuf::from("Assets")),
         };
         let mut response = serde_json::to_vec(&paths).unwrap();
         let host = HostApi {
