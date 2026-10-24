@@ -1,18 +1,20 @@
 [package]
 name = "vchat-plugin-api"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
-build = "build.rs"
 
 [lib]
 path = "lib.rs"
+crate-type = ["rlib", "cdylib"]
+
+[features]
+default = []
+host-protocol = ["dep:prost"]
+sdk-dev = []
 
 [dependencies]
-prost.workspace = true
+prost = { workspace = true, optional = true }
 serde.workspace = true
 serde_json.workspace = true
+tracing.workspace = true
 vchat-core = { path = ".." }
-
-[build-dependencies]
-prost-build = "=0.14.1"
-protoc-bin-vendored = "=3.2.0"

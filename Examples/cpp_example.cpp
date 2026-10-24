@@ -1,60 +1,128 @@
-// C++ SDK 示例：所有异常在 C ABI 边界捕获，响应通过宿主写入回调。
-#include "internal_plugin.h"
-#include "internal_plugin.pb.h"
-#include <memory>
-#include <string>
+// C++ SDK 示例：直接使用结构化 C ABI，所有输出在同步 sink 中复制。
+#include "VCPluginInterface.h"
 #include <cstddef>
-static_assert(offsetof(VChatHostApi, generation) == 8);
-static_assert(offsetof(VChatPluginApi, create) == 8);
-static_assert(sizeof(VChatPluginApi) == 8 + sizeof(void*) * 8);
-namespace proto = vchat::plugin::v1;
-struct Context { VChatHostApi host; uint64_t count = 0; };
-static int32_t create(const VChatHostApi* host, const uint8_t*, size_t, void** out) {
-    try {
-        if (!host || !out || host->abi_version != 1 || host->struct_size < sizeof(VChatHostApi)) return 1;
-        *out = new Context{*host}; return 0;
-    } catch (...) { return 1; }
+#include <limits>
+#include <stdexcept>
+#include <string>
+#include <vector>
+
+static_assert(offsetof(VCHostApi, generation) == 8);
+static_assert(offsetof(VCPluginApi, create) == 8);
+static_assert(sizeof(VCPluginApi) == 8 + sizeof(void*) * 8);
+struct Context { VCHostApi host; uint64_t count = 0; };
+
+template<class T> static T initialized() {
+    T value{};
+    value.header = {VC_ABI_VERSION, static_cast<uint32_t>(sizeof(T))};
+    return value;
 }
-static int32_t lifecycle(void*) { return 0; }
-static int32_t invoke(void* ptr, const uint8_t* data, size_t len, VChatWrite write, void* out) {
+static VCString text(const std::string& value) {
+    return {reinterpret_cast<const uint8_t*>(value.data()), static_cast<uint64_t>(value.size())};
+}
+static VCBytes bytes(const std::string& value) {
+    return {reinterpret_cast<const uint8_t*>(value.data()), static_cast<uint64_t>(value.size()), 1};
+}
+static std::string copied(VCString value) {
+    if (value.len > VC_MAX_BYTES || (value.len && !value.data)) throw std::invalid_argument("string view");
+    return value.len ? std::string(reinterpret_cast<const char*>(value.data), static_cast<size_t>(value.len)) : std::string{};
+}
+// 集合按宿主提供的 stride 访问，尾部扩展保持各元素起始地址正确。
+template<class T, class Slice> static std::vector<T> copied_slice(Slice value) {
+    if (value.len && (!value.data || value.stride < sizeof(T) || value.stride % alignof(T))) throw std::invalid_argument("slice view");
+    if (value.len > VC_MAX_BYTES / sizeof(T) || (value.len && value.stride > VC_MAX_BYTES / value.len)) throw std::invalid_argument("slice limit");
+    std::vector<T> result;
+    for (uint64_t i = 0; i < value.len; ++i) {
+        auto item = reinterpret_cast<const T*>(reinterpret_cast<const uint8_t*>(value.data) + i * value.stride);
+        if (item->header.abi_version != VC_ABI_VERSION || item->header.struct_size < sizeof(T)) throw std::invalid_argument("slice header");
+        result.push_back(*item);
+    }
+    return result;
+}
+static int32_t VC_CALL create(const VCHostApi* host, VCString, VCPluginContext* out) {
     try {
-        proto::PluginRequest request;
-        if (!request.ParseFromArray(data, static_cast<int>(len)) || request.protocol_version() != 1) return 1;
-        auto& ctx = *static_cast<Context*>(ptr); ++ctx.count;
-        proto::PluginResponse response;
-        response.set_payload_json(request.operation() == "counter" ? std::to_string(ctx.count) : request.payload_json());
-        if (request.operation() == "typed-transform") {
-            if (!request.has_document() || !request.has_message() || !request.message().has_document() || request.message().source_id().empty()) return 1;
-            auto* edit = response.mutable_edit();
-            edit->set_expected_revision(request.document().revision());
-            auto* document = edit->mutable_replacement();
-            *document = request.message().document();
-            document->set_revision(request.document().revision() + 1);
-            if (document->paragraphs_size() == 0) document->add_paragraphs();
-            auto* segment = document->mutable_paragraphs(document->paragraphs_size()-1)->add_segments();
-            segment->set_text(" [C++]");
-            segment->mutable_style()->set_bold(true);
+        if (!out) return VC_INVALID;
+        *out = nullptr;
+        if (!host || host->abi_version != VC_ABI_VERSION || host->struct_size < sizeof(VCHostApi) || !host->invoke) return VC_INVALID;
+        *out = new Context{*host};
+        return VC_OK;
+    } catch (...) { return VC_ERROR; }
+}
+static int32_t VC_CALL lifecycle(VCPluginContext ptr) { return ptr ? VC_OK : VC_INVALID; }
+// 回复引用的借用数据与本地容器全部持续到 sink 返回。
+static int32_t VC_CALL invoke(VCPluginContext ptr, const VCPluginRequest* request, VCReplySink sink, void* out) {
+    try {
+        if (!ptr || !request || !sink || request->header.abi_version != VC_ABI_VERSION || request->header.struct_size < sizeof(VCPluginRequest)) return VC_INVALID;
+        auto& ctx = *static_cast<Context*>(ptr);
+        ++ctx.count;
+        auto response = initialized<VCPluginResponse>();
+        auto reply = initialized<VCResponse>();
+        reply.kind = VC_RESPONSE_PLUGIN;
+        reply.plugin = &response;
+        response.payload_json = request->payload_json;
+        const auto operation = copied(request->operation);
+        std::string counter;
+        if (operation == "counter") {
+            counter = std::to_string(ctx.count);
+            response.payload_json = bytes(counter);
         }
-        auto bytes = response.SerializeAsString();
-        return write(out, reinterpret_cast<const uint8_t*>(bytes.data()), bytes.size());
-    } catch (...) { return 1; }
+        VCDocument document{};
+        VCDocumentEdit edit{};
+        std::vector<VCParagraph> paragraphs;
+        std::vector<VCSegment> segments;
+        VCTextStyle style{};
+        const std::string suffix = " [C++]";
+        if (operation == "typed-transform" || operation == "transform") {
+            if (!request->document || !request->message || !request->message->document || !request->message->source_id.len) return VC_INVALID;
+            document = *request->message->document;
+            document.revision = request->document->revision + 1;
+            paragraphs = copied_slice<VCParagraph>(document.paragraphs);
+            if (paragraphs.empty()) paragraphs.push_back(initialized<VCParagraph>());
+            segments = copied_slice<VCSegment>(paragraphs.back().segments);
+            style = initialized<VCTextStyle>();
+            style.bold = 1;
+            auto segment = initialized<VCSegment>();
+            segment.text = text(suffix);
+            segment.style = &style;
+            segments.push_back(segment);
+            paragraphs.back().segments = {segments.data(), static_cast<uint64_t>(segments.size()), sizeof(VCSegment)};
+            document.paragraphs = {paragraphs.data(), static_cast<uint64_t>(paragraphs.size()), sizeof(VCParagraph)};
+            edit = initialized<VCDocumentEdit>();
+            edit.expected_revision = request->document->revision;
+            edit.replacement = &document;
+            response.edit = &edit;
+        }
+        return sink(out, &reply);
+    } catch (...) { return VC_ERROR; }
 }
-static int32_t save(void* ptr, VChatWrite write, void* out) {
+static int32_t VC_CALL save(VCPluginContext ptr, VCReplySink sink, void* out) {
     try {
-        proto::StateSnapshot snapshot;
-        snapshot.set_plugin_id("example.cpp"); snapshot.set_format_version(1);
-        snapshot.set_data(std::to_string(static_cast<Context*>(ptr)->count));
-        auto bytes = snapshot.SerializeAsString();
-        return write(out, reinterpret_cast<const uint8_t*>(bytes.data()), bytes.size());
-    } catch (...) { return 1; }
+        if (!ptr || !sink) return VC_INVALID;
+        const std::string id = "example.cpp";
+        const std::string count = std::to_string(static_cast<Context*>(ptr)->count);
+        auto state = initialized<VCStateSnapshot>();
+        state.plugin_id = text(id);
+        state.format_version = 1;
+        state.data = bytes(count);
+        auto reply = initialized<VCResponse>();
+        reply.kind = VC_RESPONSE_SNAPSHOT;
+        reply.snapshot = &state;
+        return sink(out, &reply);
+    } catch (...) { return VC_ERROR; }
 }
-static int32_t restore(void* ptr, const uint8_t* data, size_t len) {
+static int32_t VC_CALL restore(VCPluginContext ptr, const VCStateSnapshot* state) {
     try {
-        proto::StateSnapshot snapshot;
-        if (!snapshot.ParseFromArray(data, static_cast<int>(len)) || snapshot.format_version() != 1 || snapshot.plugin_id() != "example.cpp") return 1;
-        static_cast<Context*>(ptr)->count = std::stoull(snapshot.data()); return 0;
-    } catch (...) { return 1; }
+        if (!ptr || !state || state->header.abi_version != VC_ABI_VERSION || state->header.struct_size < sizeof(VCStateSnapshot) || state->format_version != 1 || copied(state->plugin_id) != "example.cpp") return VC_INVALID;
+        if (state->data.len > VC_MAX_BYTES || state->data.stride != 1 || (state->data.len && !state->data.data)) return VC_INVALID;
+        const std::string value(reinterpret_cast<const char*>(state->data.data), static_cast<size_t>(state->data.len));
+        size_t end = 0;
+        auto count = std::stoull(value, &end);
+        if (end != value.size()) return VC_INVALID;
+        static_cast<Context*>(ptr)->count = count;
+        return VC_OK;
+    } catch (...) { return VC_ERROR; }
 }
-static int32_t destroy(void* ptr) { try { delete static_cast<Context*>(ptr); return 0; } catch (...) { return 1; } }
-static const VChatPluginApi api{1, sizeof(VChatPluginApi), create, lifecycle, invoke, lifecycle, lifecycle, save, restore, destroy};
-extern "C" VCHAT_EXPORT const VChatPluginApi* vchat_internal_plugin_get_api(void) { return &api; }
+static int32_t VC_CALL destroy(VCPluginContext ptr) {
+    try { delete static_cast<Context*>(ptr); return VC_OK; } catch (...) { return VC_ERROR; }
+}
+static const VCPluginApi api{VC_ABI_VERSION, sizeof(VCPluginApi), create, lifecycle, invoke, lifecycle, lifecycle, save, restore, destroy};
+extern "C" VC_EXPORT const VCPluginApi* VC_CALL vchat_internal_plugin_get_api(void) { return &api; }

@@ -50,7 +50,7 @@ pub fn cards_to_proto(cards: &[OutputCard]) -> Vec<proto::OutputCard> {
         .collect()
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "host-protocol"))]
 mod tests {
     use super::*;
     use prost::Message;

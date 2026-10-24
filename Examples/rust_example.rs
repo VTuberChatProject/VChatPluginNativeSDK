@@ -1,5 +1,4 @@
 //! Rust SDK 示例：序号状态、工具栏命令和安全 C ABI。
-use prost::Message;
 use std::{
     ffi::c_void,
     panic::{AssertUnwindSafe, catch_unwind},
@@ -9,7 +8,13 @@ use std::{
     },
     thread::JoinHandle,
 };
-use vchat_plugin_api::{abi::*, proto::*};
+use vchat_plugin_api::{
+    abi::{
+        ABI_VERSION, HostApi, HostContext, HostInvoke, PluginApi, PluginContext, ReplySink,
+        STATUS_ERROR, STATUS_INVALID, STATUS_OK, StringView,
+    },
+    proto::*,
+};
 
 struct Context {
     host: HostApi,
@@ -40,20 +45,25 @@ unsafe fn bytes<'a>(p: *const u8, n: usize) -> &'a [u8] {
 }
 unsafe extern "C" fn create(
     host: *const HostApi,
-    data: *const u8,
-    len: usize,
+    config: StringView,
     out: *mut PluginContext,
 ) -> i32 {
     boundary(|| {
+        let data = config.data;
+        let len = match usize::try_from(config.len) {
+            Ok(value) => value,
+            Err(_) => return STATUS_ERROR,
+        };
         if host.is_null() || out.is_null() {
             return STATUS_ERROR;
         }
-        let host = unsafe { *host };
-        if host.abi_version != ABI_VERSION
-            || host.struct_size < std::mem::size_of::<HostApi>() as u32
-        {
-            return STATUS_ERROR;
-        }
+        unsafe {
+            *out = std::ptr::null_mut();
+        };
+        let host = match unsafe { vchat_plugin_api::sdk::read_host_api(host) } {
+            Ok(host) => host,
+            Err(_) => return STATUS_ERROR,
+        };
         let config: serde_json::Value =
             serde_json::from_slice(unsafe { bytes(data, len) }).unwrap_or_default();
         let value = Box::new(Context {
@@ -89,16 +99,14 @@ unsafe extern "C" fn start(p: PluginContext) -> i32 {
                 service: "config.set".into(),
                 payload_json: serde_json::to_vec(config).unwrap(),
                 ..Default::default()
-            }
-            .encode_to_vec();
+            };
             let status = unsafe {
-                (ctx.host.invoke)(
-                    ctx.host.context,
-                    request.as_ptr(),
-                    request.len(),
-                    ignore_write,
-                    std::ptr::null_mut(),
-                )
+                vchat_plugin_api::sdk::call_host(&ctx.host, &request)
+                    .map(|_| STATUS_OK)
+                    .unwrap_or_else(|error| {
+                        eprintln!("插件宿主调用失败: {error}");
+                        STATUS_ERROR
+                    })
             };
             if status != STATUS_OK {
                 return status;
@@ -126,16 +134,14 @@ unsafe extern "C" fn start(p: PluginContext) -> i32 {
             service: "ui.register".into(),
             ui: Some(ui),
             ..Default::default()
-        }
-        .encode_to_vec();
+        };
         let status = unsafe {
-            (ctx.host.invoke)(
-                ctx.host.context,
-                request.as_ptr(),
-                request.len(),
-                ignore_write,
-                std::ptr::null_mut(),
-            )
+            vchat_plugin_api::sdk::call_host(&ctx.host, &request)
+                .map(|_| STATUS_OK)
+                .unwrap_or_else(|error| {
+                    eprintln!("插件宿主调用失败: {error}");
+                    STATUS_ERROR
+                })
         };
         if status != STATUS_OK {
             return status;
@@ -149,16 +155,14 @@ unsafe extern "C" fn start(p: PluginContext) -> i32 {
                 }))
                 .unwrap(),
                 ..Default::default()
-            }
-            .encode_to_vec();
+            };
             let status = unsafe {
-                (ctx.host.invoke)(
-                    ctx.host.context,
-                    request.as_ptr(),
-                    request.len(),
-                    ignore_write,
-                    std::ptr::null_mut(),
-                )
+                vchat_plugin_api::sdk::call_host(&ctx.host, &request)
+                    .map(|_| STATUS_OK)
+                    .unwrap_or_else(|error| {
+                        eprintln!("插件宿主调用失败: {error}");
+                        STATUS_ERROR
+                    })
             };
             if status != STATUS_OK {
                 return status;
@@ -230,31 +234,34 @@ fn post_message(invoke: HostInvoke, context: usize, event: &str, text: &str) -> 
         event_id: event.into(),
         payload_json: serde_json::to_vec(&payload).unwrap(),
         ..Default::default()
-    }
-    .encode_to_vec();
+    };
     unsafe {
-        invoke(
-            context as HostContext,
-            bytes.as_ptr(),
-            bytes.len(),
-            ignore_write,
-            std::ptr::null_mut(),
-        )
+        vchat_plugin_api::sdk::with_host_request(&bytes, |request| {
+            invoke(
+                context as HostContext,
+                request,
+                ignore_write,
+                std::ptr::null_mut(),
+            )
+        })
+        .unwrap_or(STATUS_ERROR)
     }
 }
-unsafe extern "C" fn ignore_write(_: *mut c_void, _: *const u8, _: usize) -> i32 {
+unsafe extern "C" fn ignore_write(
+    _: *mut c_void,
+    _: *const vchat_plugin_api::abi::Response,
+) -> i32 {
     STATUS_OK
 }
 unsafe extern "C" fn invoke(
     p: PluginContext,
-    data: *const u8,
-    len: usize,
-    write: WriteCallback,
+    request: *const vchat_plugin_api::abi::PluginRequest,
+    write: ReplySink,
     out: *mut c_void,
 ) -> i32 {
     boundary(|| {
         let ctx = unsafe { context(p) };
-        let Ok(request) = PluginRequest::decode(unsafe { bytes(data, len) }) else {
+        let Ok(request) = (unsafe { vchat_plugin_api::sdk::read_request(request) }) else {
             return STATUS_ERROR;
         };
         if request.protocol_version != 1 {
@@ -283,6 +290,24 @@ unsafe extern "C" fn invoke(
             response.payload_json =
                 serde_json::to_vec(&ctx.background_posts.load(Ordering::Acquire)).unwrap();
         }
+        if request.operation == "transform" {
+            let Some(document) = request.document.clone().or_else(|| {
+                request
+                    .message
+                    .as_ref()
+                    .and_then(|message| message.document.clone())
+            }) else {
+                return STATUS_INVALID;
+            };
+            response.payload_json.clear();
+            response.edit = Some(DocumentEdit {
+                expected_revision: document.revision,
+                replacement: Some(document),
+            });
+        }
+        if request.operation == "event" {
+            response.payload_json.clear();
+        }
         if request.operation == "ui.command"
             && let Some(mut document) = request.document
         {
@@ -306,8 +331,7 @@ unsafe extern "C" fn invoke(
                 replacement: Some(document),
             });
         }
-        let data = response.encode_to_vec();
-        unsafe { write(out, data.as_ptr(), data.len()) }
+        unsafe { vchat_plugin_api::sdk::write_response(&response, write, out) }
     })
 }
 /// quiesce 等待后台线程结束；返回成功时所有 HostContext 回调已完成。
@@ -324,25 +348,27 @@ unsafe extern "C" fn quiesce(p: PluginContext) -> i32 {
         STATUS_OK
     })
 }
-unsafe extern "C" fn save(p: PluginContext, write: WriteCallback, out: *mut c_void) -> i32 {
+unsafe extern "C" fn save(p: PluginContext, write: ReplySink, out: *mut c_void) -> i32 {
     boundary(|| {
         let ctx = unsafe { context(p) };
         let state = StateSnapshot {
             plugin_id: "example.counter".into(),
             format_version: 1,
             data: ctx.count.to_le_bytes().to_vec(),
-        }
-        .encode_to_vec();
-        unsafe { write(out, state.as_ptr(), state.len()) }
+        };
+        unsafe { vchat_plugin_api::sdk::write_snapshot(&state, write, out) }
     })
 }
-unsafe extern "C" fn restore(p: PluginContext, data: *const u8, len: usize) -> i32 {
+unsafe extern "C" fn restore(
+    p: PluginContext,
+    snapshot: *const vchat_plugin_api::abi::StateSnapshot,
+) -> i32 {
     boundary(|| {
         let ctx = unsafe { context(p) };
         if ctx.fail_restore {
             return STATUS_ERROR;
         }
-        let Ok(snapshot) = StateSnapshot::decode(unsafe { bytes(data, len) }) else {
+        let Ok(snapshot) = (unsafe { vchat_plugin_api::sdk::read_snapshot(snapshot) }) else {
             return STATUS_ERROR;
         };
         if snapshot.plugin_id != "example.counter" || snapshot.format_version != 1 {

@@ -1,11 +1,10 @@
 [package]
 name = "vchat-example-plugin"
-version = "1.0.0"
+version = "2.0.0"
 edition = "2024"
 [lib]
 path = "rust_example.rs"
 crate-type = ["cdylib", "rlib"]
 [dependencies]
 vchat-plugin-api = { path = "../Core/Interfaces" }
-prost.workspace = true
 serde_json.workspace = true

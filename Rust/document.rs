@@ -126,7 +126,7 @@ pub fn message_to_proto(value: &vchat_core::Message) -> proto::Message {
     proto::Message {
         id: value.id.to_string(),
         source_id: value.source_id.clone(),
-        source_message_id: value.source_message_id.clone().unwrap_or_default(),
+        source_message_id: value.source_message_id.clone(),
         received_at_ms: value.received_at,
         sequence: value.sequence,
         document: Some(document_to_proto(&value.document)),
@@ -147,7 +147,7 @@ pub fn message_to_proto(value: &vchat_core::Message) -> proto::Message {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "host-protocol"))]
 mod tests {
     use super::*;
     use prost::Message;
