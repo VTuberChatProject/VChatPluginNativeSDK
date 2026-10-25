@@ -1,0 +1,44 @@
+# 验证独立 SDK、跨语言 ABI 和可重新构建的发行包。
+name: Native SDK
+on: [push, pull_request, workflow_dispatch]
+jobs:
+  native:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.99.0
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all -- --check
+      - run: cargo test --locked --workspace
+      - run: cargo test --locked -p vchat-plugin-api --all-features
+      - run: cargo clippy --locked --workspace --all-targets -- -D warnings
+      - name: Check default dependencies
+        shell: pwsh
+        run: |
+          $tree = cargo tree --locked -p vchat-plugin-api --no-default-features
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if ($tree -match '\b(prost|prost-build|protoc-bin-vendored)\b') { throw '默认 Native SDK 依赖树包含 Protobuf' }
+      - run: cargo build --locked --workspace
+      - run: cmake -S Examples -B target/cpp-plugin
+      - run: cmake --build target/cpp-plugin --config Release --parallel 4
+      - run: python Tools/package-sdk.py
+      - name: Verify development library and packaged workspace
+        shell: pwsh
+        run: |
+          $sdk = Get-ChildItem target/dist -Directory -Filter 'VCPluginSDK-*' | Select-Object -First 1
+          $library = if ($IsWindows) { 'VCPluginInterface.dll' } elseif ($IsMacOS) { 'libVCPluginInterface.dylib' } else { 'libVCPluginInterface.so' }
+          $plugin = Get-ChildItem target/cpp-plugin -Recurse -File | Where-Object { $_.Name -match '^(lib)?vchat_cpp_example\.(dll|so|dylib)$' } | Select-Object -First 1
+          python Tools/sdk-host.py --library (Join-Path $sdk.FullName $library) --plugin $plugin.FullName
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo check --locked --manifest-path (Join-Path $sdk.FullName 'Cargo.toml') --workspace
+          exit $LASTEXITCODE
+      - uses: actions/upload-artifact@v4
+        with:
+          name: VChatPluginNativeSDK-${{ runner.os }}
+          path: target/dist/VCPluginSDK-*/

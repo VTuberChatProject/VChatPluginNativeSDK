@@ -1,5 +1,5 @@
 //! 消息标识、来源策略及生命周期状态。
-use crate::{Document, MessageTypeKey};
+use crate::model::{Document, MessageTypeKey};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 

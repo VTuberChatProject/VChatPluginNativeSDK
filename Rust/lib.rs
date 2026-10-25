@@ -2,6 +2,7 @@
 pub mod abi;
 pub mod document;
 mod memory;
+pub mod model;
 pub mod output;
 mod projection;
 #[path = "models.rs"]

@@ -1,6 +1,6 @@
 //! 将共享富文本文档转换为结构化 Protobuf，并保留扩展字段。
+use crate::model::{Document, Image, Paragraph, Segment, TextStyle};
 use crate::proto;
-use vchat_core::{Document, Image, Paragraph, Segment, TextStyle};
 
 pub fn document_to_proto(value: &Document) -> proto::Document {
     proto::Document {
@@ -122,7 +122,7 @@ pub fn document_from_proto(value: &proto::Document) -> Result<Document, String> 
 }
 
 /// 消息元数据与结构化文档共同进入 Protobuf，JSON 保留扩展入口。
-pub fn message_to_proto(value: &vchat_core::Message) -> proto::Message {
+pub fn message_to_proto(value: &crate::model::Message) -> proto::Message {
     proto::Message {
         id: value.id.to_string(),
         source_id: value.source_id.clone(),
@@ -183,13 +183,13 @@ mod tests {
     #[test]
     fn message_type_identity_is_optional_and_survives_protobuf() {
         let mut message =
-            vchat_core::Message::new("source", "author", Document::plain("消息"), 1, 1);
+            crate::model::Message::new("source", "author", Document::plain("消息"), 1, 1);
         let old = message_to_proto(&message).encode_to_vec();
         assert_eq!(
             proto::Message::decode(old.as_slice()).unwrap().message_type,
             None
         );
-        message.message_type = Some(vchat_core::MessageTypeKey {
+        message.message_type = Some(crate::model::MessageTypeKey {
             plugin_kind: "internal".into(),
             plugin_id: "example".into(),
             type_id: "remote".into(),

@@ -24,7 +24,7 @@ fn payload_roundtrip(service: &str, payload: Value) {
 fn standard_host_requests_use_typed_views() {
     payload_roundtrip(
         "message.post",
-        json!({"source_id":"internal:sample","source_message_id":"1","username":"测试 👋","message_type":"remote","avatar_url":"https://example.com/a.png","document":vchat_core::Document::plain("富文本"),"origin_ids":["upstream"]}),
+        json!({"source_id":"internal:sample","source_message_id":"1","username":"测试 👋","message_type":"remote","avatar_url":"https://example.com/a.png","document":crate::model::Document::plain("富文本"),"origin_ids":["upstream"]}),
     );
     payload_roundtrip(
         "message.types.register",
@@ -49,10 +49,10 @@ fn standard_host_requests_use_typed_views() {
 }
 #[test]
 fn frontend_document_and_metadata_survive_deep_copy() {
-    let mut message = vchat_core::Message::new(
+    let mut message = crate::model::Message::new(
         "source",
         "发送者",
-        vchat_core::Document::plain("你好 👨‍👩‍👧‍👦"),
+        crate::model::Document::plain("你好 👨‍👩‍👧‍👦"),
         123,
         4,
     );
@@ -252,7 +252,7 @@ fn incoming_source_message_id_preserves_missing_null_and_empty() {
         Some(json!("remote-1")),
     ] {
         let mut payload =
-            json!({"username":"来源","document":vchat_core::Document::plain("独立消息")});
+            json!({"username":"来源","document":crate::model::Document::plain("独立消息")});
         if let Some(value) = value {
             payload["source_message_id"] = value;
         }
@@ -321,10 +321,10 @@ fn plugin_tables_reject_short_misaligned_and_missing_slots() {
 #[test]
 fn complete_message_preserves_optional_source_id_through_abi() {
     for source_message_id in [None, Some(String::new()), Some("remote-1".to_owned())] {
-        let mut message = vchat_core::Message::new(
+        let mut message = crate::model::Message::new(
             "upstream",
             "来源",
-            vchat_core::Document::plain("独立消息"),
+            crate::model::Document::plain("独立消息"),
             123,
             4,
         );
@@ -348,7 +348,7 @@ fn complete_message_preserves_optional_source_id_through_abi() {
         let copy = sdk::with_request(&request, |view| unsafe { sdk::read_request(view) }.unwrap())
             .unwrap();
         assert_eq!(copy.message.unwrap().source_message_id, source_message_id);
-        let decoded: vchat_core::Message = serde_json::from_slice(&copy.payload_json).unwrap();
+        let decoded: crate::model::Message = serde_json::from_slice(&copy.payload_json).unwrap();
         assert_eq!(decoded, message);
         payload_roundtrip(
             "frontend.message",

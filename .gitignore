@@ -1,0 +1,4 @@
+# 独立 SDK 构建与测试缓存。
+/target/
+__pycache__/
+*.py[cod]

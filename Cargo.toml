@@ -1,0 +1,14 @@
+# 插件开发专用 workspace，接口与模型均由本仓库维护。
+[workspace]
+resolver = "2"
+members = ["Rust", "Examples"]
+
+[workspace.dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tracing = "0.1"
+prost = "0.14"
+uuid = { version = "1.18", features = ["v4", "serde"] }
+thiserror = "2.0"
+unicode-segmentation = "1.13"
+url = "2.5"

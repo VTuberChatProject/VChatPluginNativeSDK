@@ -1,6 +1,6 @@
 //! 内置插件 Protobuf 输出声明与宿主共享模型的转换。
+use crate::model::{OutputAction, OutputActionKind, OutputCard};
 use crate::proto;
-use vchat_core::{OutputAction, OutputActionKind, OutputCard};
 
 /// 保留插件的声明顺序，并让未知标准操作在注册边界返回错误。
 pub fn cards_from_proto(cards: &[proto::OutputCard]) -> Result<Vec<OutputCard>, String> {

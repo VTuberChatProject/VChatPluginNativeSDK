@@ -42,12 +42,13 @@ fn restore<T: serde::Serialize>(value: &T, present: &[String], extra: &[u8]) -> 
     bytes(out)
 }
 fn core_document(value: Value) -> Result<m::Document> {
-    let doc: vchat_core::Document = serde_json::from_value(value).map_err(|e| e.to_string())?;
+    let doc: crate::model::Document = serde_json::from_value(value).map_err(|e| e.to_string())?;
     doc.validate().map_err(|e| e.to_string())?;
     Ok(document::document_to_proto(&doc))
 }
 fn core_message(value: Value) -> Result<m::Message> {
-    let message: vchat_core::Message = serde_json::from_value(value).map_err(|e| e.to_string())?;
+    let message: crate::model::Message =
+        serde_json::from_value(value).map_err(|e| e.to_string())?;
     Ok(document::message_to_proto(&message))
 }
 fn message_value(v: &m::Message) -> Result<Value> {
