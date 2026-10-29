@@ -4,6 +4,7 @@ pub mod document;
 mod memory;
 pub mod model;
 pub mod output;
+pub mod output_route;
 mod projection;
 #[path = "models.rs"]
 pub mod proto;

@@ -25,6 +25,22 @@ ABI 使用固定宽度整数、自然对齐、UTF-8 字符串、带布局信息�
 宿主权限为 messages、events、ui、frontend、web；runtime.paths/log 面向全部实例。现有消息类型、前端、窗口与 Web 路由服务继续提供。
 编辑提交检查 expected_revision，路由整组校验冲突，剧本回执保留 run_id/batch_id/message_id/generation，过滤退休批次。
 
+## 按输出卡片投递
+
+manifest 声明 `output_cards_v1`，通过版本 2 的 `frontend.register` 登记端点：
+
+```json
+{"version":2,"outputs":[{"card_id":"live","receipt_mode":"completed"},{"card_id":"history","receipt_mode":"accepted"}]}
+```
+
+`card_id` 对应 `ui.register` 的输出卡片。Rust 的 `output_route::OutputRegistration` 与 `frontend_id(kind, plugin_id, card_id)` 可构造登记与稳定身份。宿主向该卡投递版本 2 信封，包含 `frontend_id/plugin_id/card_id/message_id/batch_id`，消息正文保存在 `message`；剧本另带 `run_id/generation`。清屏沿用 `clear` 操作并携带相同目标定位。
+
+插件通过 `frontend.receipt` 原样回传目标与批次字段。实时端点以 `completed` 确认消费完成，归档端点以 `accepted` 确认接收；失败使用 `failed` 与 `error`。宿主按当前实例会话、卡片和活动批次校验回执，退休批次的回执会被拒绝。普通消息、预览和剧本均遵循用户连线。
+
+预览使用 `preview` 操作和完整卡片、消息、批次身份，插件消费后跳过正式队列回执。
+
+这些字段通过现有 FrontendPayload 扩展区传递，C ABI 2 的结构大小与布局保持稳定。旧版插件继续展示入口，画布提示待适配；升级并登记端点后可手动连接。
+
 ## 插件模型
 
 `model` 模块提供拥有型 `Document`、`Message`、`Paragraph`、`Segment`、`TextStyle`、`Image` 和输出卡片类型。`document` 与 `output` 模块负责这些模型与 `proto` 交换模型的转换，默认值、可选字段和扩展 JSON 按现有业务协议保留。

@@ -2,6 +2,59 @@
 use crate::{abi::*, proto, sdk, sdk_host};
 use serde_json::{Value, json};
 use std::ffi::c_void;
+#[test]
+fn nana_dialogue_v2_fixture_preserves_card_and_script_contract() {
+    let plugin_id = "builtin.nana-dialogue";
+    let frontend_id = crate::output_route::frontend_id("internal", plugin_id, "dialogue");
+    payload_roundtrip(
+        "frontend.register",
+        json!({"version":2,"outputs":[
+        {"card_id":"dialogue","receipt_mode":"completed"}]}),
+    );
+    let message = crate::model::Message::new(
+        "host",
+        "角色",
+        crate::model::Document::plain("契约夹具"),
+        1,
+        1,
+    );
+    let payload = json!({"version":2,"frontend_id":frontend_id,"plugin_id":plugin_id,
+        "card_id":"dialogue","message_id":message.id,"batch_id":"663d2d58-65da-4fea-8768-c785e48227a6",
+        "run_id":"3930718f-45b7-48b5-ab2b-629091c321da","generation":7,"message":message});
+    let request = proto::PluginRequest {
+        protocol_version: 1,
+        operation: "message".into(),
+        payload_json: serde_json::to_vec(&payload).unwrap(),
+        ..Default::default()
+    };
+    let copy =
+        sdk::with_request(&request, |view| unsafe { sdk::read_request(view) }.unwrap()).unwrap();
+    assert_eq!(
+        serde_json::from_slice::<Value>(&copy.payload_json).unwrap(),
+        payload
+    );
+    payload_roundtrip("frontend.message", payload.clone());
+    let mut receipt = payload;
+    receipt.as_object_mut().unwrap().remove("message");
+    receipt["status"] = "completed".into();
+    payload_roundtrip("frontend.receipt", receipt);
+}
+#[test]
+fn output_card_v2_extensions_preserve_abi2_layout_and_identity() {
+    let target = crate::output_route::frontend_id("internal", "sample", "live");
+    payload_roundtrip(
+        "frontend.register",
+        json!({"version":2,"outputs":[
+        {"card_id":"live","receipt_mode":"completed"},
+        {"card_id":"history","receipt_mode":"accepted"}]}),
+    );
+    payload_roundtrip(
+        "frontend.receipt",
+        json!({"version":2,"frontend_id":target,
+        "plugin_id":"sample","card_id":"live","message_id":"m","batch_id":"b","status":"completed"}),
+    );
+    assert_eq!(ABI_VERSION, 2);
+}
 fn payload_roundtrip(service: &str, payload: Value) {
     let request = proto::HostRequest {
         service: service.into(),
